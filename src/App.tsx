@@ -1,3 +1,4 @@
+import { PRESETS, type PresetId } from './simulation/presets';
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
@@ -29,7 +30,6 @@ import {
   DEFAULT_TASKS,
   SCENARIOS,
   formatNumber as fmt,
-  nextEventTime,
   simulate,
   validateTasks,
   type Configuration,
@@ -65,10 +65,18 @@ function Metric({
   );
 }
 
-function EventLog({ result, time }: { result: Simulation; time: number }) {
+function EventLog({
+  result,
+  time,
+  started,
+}: {
+  result: Simulation;
+  time: number;
+  started: boolean;
+}) {
   const [filter, setFilter] = useState('all');
   const visible = result.events.filter(
-    (e) => e.time <= time && (filter === 'all' || e.type === filter),
+    (e) => started && e.time <= time && (filter === 'all' || e.type === filter),
   );
   return (
     <section className="panel event-panel" aria-labelledby="log-title">
@@ -107,7 +115,9 @@ function EventLog({ result, time }: { result: Simulation; time: number }) {
           ))
         ) : (
           <p className="empty-state">
-            No matching events at this playback position. Step forward to reveal more.
+            {started
+              ? 'No matching events at this playback position. Step forward to reveal more.'
+              : 'Schedule preview: no execution events yet. Run or step to begin playback.'}
           </p>
         )}
       </div>
@@ -159,6 +169,17 @@ export default function App() {
           ].map((c) => simulate(tasks, c)),
     [tasks, errors, custom],
   );
+  const baseline = comparisons[0] ?? null;
+  const horizon = Math.max(result?.makespan ?? 0, baseline?.makespan ?? 0);
+  const eventTimes = [
+    ...new Set([...(result?.eventTimes ?? []), ...(baseline?.eventTimes ?? [])]),
+  ].sort((a, b) => a - b);
+  const [preset, setPreset] = useState<PresetId | 'custom'>('mixed');
+  function loadPreset(id: PresetId) {
+    resetPlayback();
+    setRows(toRows(PRESETS[id].tasks));
+    setPreset(id);
+  }
   const selectedLabel = label(configuration);
 
   function resetPlayback() {
@@ -169,6 +190,7 @@ export default function App() {
   function updateRows(next: TaskRow[]) {
     resetPlayback();
     setRows(next);
+    setPreset('custom');
   }
   function selectConfiguration(next: Configuration, isCustom = false) {
     resetPlayback();
@@ -182,7 +204,7 @@ export default function App() {
   }
   function play() {
     if (!result) return;
-    if (time >= result.makespan) setTime(0);
+    if (time >= horizon) setTime(0);
     setStarted(true);
     setRunning(true);
   }
@@ -190,7 +212,7 @@ export default function App() {
     if (!result) return;
     setRunning(false);
     setStarted(true);
-    setTime(nextEventTime(result, time));
+    setTime(eventTimes.find((t) => t > time) ?? horizon);
   }
   useEffect(() => {
     if (!running || !result) return;
@@ -199,13 +221,13 @@ export default function App() {
       const now = performance.now();
       const elapsed = ((now - last) / 1000) * speed;
       last = now;
-      setTime((t) => Math.min(result.makespan, t + elapsed));
+      setTime((t) => Math.min(horizon, t + elapsed));
     }, 40);
     return () => window.clearInterval(timer);
-  }, [running, result, speed]);
+  }, [running, result, speed, horizon]);
   useEffect(() => {
-    if (result && time >= result.makespan && running) setRunning(false);
-  }, [time, result, running]);
+    if (result && time >= horizon && running) setRunning(false);
+  }, [time, result, running, horizon]);
   useEffect(() => {
     const pauseWhenHidden = () => {
       if (document.hidden) setRunning(false);
@@ -213,7 +235,7 @@ export default function App() {
     document.addEventListener('visibilitychange', pauseWhenHidden);
     return () => document.removeEventListener('visibilitychange', pauseWhenHidden);
   }, []);
-  const finished = !!result && time >= result.makespan;
+  const finished = !!result && time >= horizon;
   const status = errors.length
     ? 'Invalid workload'
     : finished
@@ -412,12 +434,36 @@ export default function App() {
                 cost. Outputs are simulated, not real CPU benchmarks.
               </p>
             </div>
+            <div className="preset-controls">
+              <label>
+                Workload preset{' '}
+                <select
+                  aria-label="Workload preset"
+                  value={preset}
+                  onChange={(e) => loadPreset(e.target.value as PresetId)}
+                >
+                  <option value="custom" disabled>
+                    Custom workload
+                  </option>
+                  {Object.entries(PRESETS).map(([id, p]) => (
+                    <option key={id} value={id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p>
+                {preset === 'custom'
+                  ? 'Custom edits - all models use this workload.'
+                  : PRESETS[preset].description}
+              </p>
+            </div>
             <div className="workspace-grid">
               <TaskEditor
                 rows={rows}
                 errors={errors}
                 onChange={updateRows}
-                onDefault={() => updateRows(toRows(DEFAULT_TASKS))}
+                onDefault={() => loadPreset('mixed')}
               />
               <section className="panel configuration-panel" aria-labelledby="config-title">
                 <div className="panel-heading">
@@ -564,7 +610,7 @@ export default function App() {
                   </select>
                 </label>
                 <span className="playback-time">
-                  {fmt(time)} <span>/ {result ? fmt(result.makespan) : '—'} tu</span>
+                  {fmt(time)} <span>/ {result ? fmt(horizon) : '—'} tu</span>
                 </span>
               </div>
             </div>
@@ -606,12 +652,60 @@ export default function App() {
                     description="Dependency-imposed time limit"
                   />
                 </div>
-                <Gantt result={result} time={time} />
+                <section className="comparison-models" aria-label="Execution Model Comparison">
+                  <div className="section-heading">
+                    <div>
+                      <h2>Execution Model Comparison</h2>
+                      <p>
+                        One workload, shared time scale and playback clock. Completed models stay
+                        complete.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="model-grid">
+                    {baseline && (
+                      <div className="model">
+                        <Gantt
+                          result={baseline}
+                          time={time}
+                          horizon={horizon}
+                          started={started}
+                          title="Sequential execution"
+                        />
+                        <p className="model-summary">
+                          1 core / 1 worker - {fmt(baseline.makespan)} tu - {fmt(baseline.speedup)}-
+                          speedup - {percent(baseline.efficiency)} efficiency -{' '}
+                          {percent(baseline.utilization)} core utilization
+                        </p>
+                      </div>
+                    )}
+                    <div className="model">
+                      <Gantt
+                        result={result}
+                        time={time}
+                        horizon={horizon}
+                        started={started}
+                        title="Selected execution"
+                      />
+                      <p className="model-summary">
+                        {configuration.cores} cores / {configuration.workers} workers -{' '}
+                        {fmt(result.makespan)} tu - {fmt(result.speedup)}- speedup -{' '}
+                        {percent(result.efficiency)} efficiency - {percent(result.utilization)} core
+                        utilization
+                      </p>
+                    </div>
+                  </div>
+                  <p className="comparison-note">
+                    Time saved: <strong>{fmt(result.baseline - result.makespan)} tu</strong>.
+                    Metrics use each model-s own execution interval, not the shared playback
+                    horizon. Critical path: {fmt(result.criticalPathLength)} tu.
+                  </p>
+                </section>
                 <div className="visual-grid">
-                  <DependencyGraph result={result} time={time} />
-                  <CoreStates result={result} time={time} />
+                  <DependencyGraph result={result} time={started ? time : -1} />
+                  <CoreStates result={result} time={time} started={started} />
                 </div>
-                <EventLog result={result} time={time} />
+                <EventLog result={result} time={time} started={started} />
               </>
             ) : (
               <div className="invalid-placeholder">
@@ -818,6 +912,18 @@ export default function App() {
               <article className="panel learning-article">
                 <span className="article-label">From model to machine</span>
                 <h3>Key Findings</h3>
+                <p>
+                  Hardware parallelism also includes pipelining, instruction-level parallelism, and
+                  SIMD. This lab focuses on multicore task execution. Software parallelism exposes
+                  independent tasks and coordinates their dependencies.
+                </p>
+                <p>
+                  Flynn-s classification: SISD (single instruction/single data stream), SIMD (single
+                  instruction/multiple data streams), MISD (multiple instruction/single data
+                  stream), and MIMD (multiple instruction/multiple data streams). This simulator
+                  illustrates tasks on a MIMD-style multicore system; it does not simulate
+                  instruction/data streams or implement those four architectures.
+                </p>
                 <p>
                   <strong>Hardware and software parallelism are complementary.</strong> Software
                   exposes independent work; multicore hardware supplies simultaneous execution

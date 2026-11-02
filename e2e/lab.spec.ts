@@ -8,7 +8,7 @@ test('light mode persists and keeps the simulation and charts accessible', async
   await page.getByRole('button', { name: 'Step to event' }).click();
   await page.getByRole('button', { name: 'Switch to light mode' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
-  await expect(page.locator('.playback-time')).toHaveText('3 / 10 tu');
+  await expect(page.locator('.playback-time')).toHaveText('3 / 18 tu');
   await expect(page.getByRole('img', { name: /^Speedup:/ })).toBeVisible();
   const audit = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
@@ -36,6 +36,66 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/');
 });
 
+test('preview, synchronized model scale, completion and worker assignments stay consistent', async ({
+  page,
+}) => {
+  await expect(page.locator('.model')).toHaveCount(2);
+  await expect(page.locator('.event-list')).toContainText('no execution events yet');
+  await expect(page.locator('.core-card.busy')).toHaveCount(0);
+  await expect(page.locator('.worker-card .core-status')).toHaveText(['Preview', 'Preview']);
+  const ticks = await page
+    .locator('.model svg.gantt')
+    .evaluateAll((nodes) =>
+      nodes.map((n) => Array.from(n.querySelectorAll('.axis-text')).map((t) => t.textContent)),
+    );
+  expect(ticks[0]).toEqual(ticks[1]);
+  const playheads = page.locator('.model .playhead');
+  await page.getByRole('button', { name: 'Step to event' }).click();
+  expect(await playheads.nth(0).getAttribute('x1')).toBe(await playheads.nth(1).getAttribute('x1'));
+  await expect(page.locator('.worker-card').nth(0)).toContainText('Task A');
+  await expect(page.locator('.worker-card').nth(1)).toContainText('Task C');
+  await expect(page.locator('.worker-card').nth(1)).toContainText('Core 2');
+  while (!(await page.locator('.playback-time').innerText()).startsWith('10 /'))
+    await page.getByRole('button', { name: 'Step to event' }).click();
+  await expect(page.locator('.core-card.busy')).toHaveCount(0);
+  await expect(page.locator('.worker-card').first()).toContainText('All work complete');
+  await expect(page.locator('.metric').nth(3)).toContainText('90%');
+  await page.getByRole('button', { name: 'Step to event' }).click();
+  await expect(page.locator('.playback-time')).toHaveText('13 / 18 tu');
+  await expect(page.locator('.model-summary').nth(1)).toContainText('90% core utilization');
+  await page.getByRole('button', { name: 'Reset playback' }).click();
+  await expect(page.locator('.worker-card .core-status')).toHaveText(['Preview', 'Preview']);
+});
+
+test('presets preserve editing, reset playback and expose policy and dependency effects', async ({
+  page,
+}) => {
+  await page.getByRole('button', { name: 'Step to event' }).click();
+  await page.getByLabel('Workload preset').selectOption('chain');
+  await expect(page.locator('.metric').first()).toContainText('18');
+  await expect(page.locator('.playback-time')).toHaveText('0 / 18 tu');
+  await page.getByLabel('Workload preset').selectOption('independent');
+  await expect(page.getByLabel('Task 4 prerequisites', { exact: true })).toHaveValue('');
+  await page.getByLabel('Task 1 duration', { exact: true }).fill('0.1001');
+  await expect(page.getByRole('alert')).toContainText('increments of 0.001');
+  await expect(page.getByLabel('Workload preset')).toHaveValue('custom');
+  await page.getByLabel('Workload preset').selectOption('policy');
+  await expect(page.locator('.metric').first()).toContainText('12');
+  await expect(page.locator('.analysis-callout')).toContainText('does not prove suboptimal');
+  await page.getByLabel('Workload preset').selectOption('mixed');
+  await expect(page.locator('.metric').first()).toContainText('10');
+  await page.getByRole('button', { name: /More hardware/ }).click();
+  await page.getByRole('button', { name: 'Step to event' }).click();
+  await expect(page.locator('.worker-card')).toHaveCount(1);
+  await expect(page.locator('.core-card:not(.worker-card) .core-status')).toHaveText([
+    'Running',
+    'Idle',
+  ]);
+  await page.getByRole('button', { name: /More software/ }).click();
+  await page.getByRole('button', { name: 'Step to event' }).click();
+  await expect(page.locator('.worker-card .core-status')).toHaveText(['Occupied', 'Available']);
+});
+
 test('default metrics, comparisons and diagrams match the scheduler', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -44,7 +104,7 @@ test('default metrics, comparisons and diagrams match the scheduler', async ({ p
   await expect(page.locator('.metric').nth(1)).toContainText('1.8');
   await expect(page.locator('.metric').nth(2)).toContainText('90%');
   await expect(page.locator('.metric').nth(3)).toContainText('90%');
-  await expect(page.getByRole('img', { name: /^Execution timeline:/ })).toBeVisible();
+  await expect(page.getByRole('img', { name: /^Execution timeline:/ }).first()).toBeVisible();
   await expect(page.getByRole('img', { name: /^Dependency graph/ })).toBeVisible();
   await expect(page.locator('.results-table tbody tr')).toHaveCount(5);
   await expect(page.locator('.results-table tbody tr').nth(0)).toContainText('18 tu');
@@ -57,7 +117,7 @@ test('default metrics, comparisons and diagrams match the scheduler', async ({ p
 
 test('playback can step, run, pause, resume, finish, and reset', async ({ page }) => {
   await page.getByRole('button', { name: 'Step to event' }).click();
-  await expect(page.locator('.playback-time')).toHaveText('3 / 10 tu');
+  await expect(page.locator('.playback-time')).toHaveText('3 / 18 tu');
   await expect(page.getByRole('status', { name: 'Simulation status' })).toHaveText('Paused');
   await page.getByRole('button', { name: 'Resume', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
@@ -70,10 +130,10 @@ test('playback can step, run, pause, resume, finish, and reset', async ({ page }
   await expect(page.getByRole('status', { name: 'Simulation status' })).toHaveText('Complete', {
     timeout: 10000,
   });
-  await expect(page.locator('.playback-time')).toHaveText('10 / 10 tu');
+  await expect(page.locator('.playback-time')).toHaveText('18 / 18 tu');
   await expect(page.locator('.event-list')).toContainText('F complete');
   await page.getByRole('button', { name: 'Reset playback' }).click();
-  await expect(page.locator('.playback-time')).toHaveText('0 / 10 tu');
+  await expect(page.locator('.playback-time')).toHaveText('0 / 18 tu');
   await expect(page.getByRole('status', { name: 'Simulation status' })).toHaveText('Ready');
 });
 
@@ -108,12 +168,12 @@ test('scenario switching and custom resource changes reset the simulation', asyn
   await page.getByRole('button', { name: /Together/ }).click();
   await page.getByRole('button', { name: 'Step to event' }).click();
   await page.getByRole('button', { name: /Select custom/ }).click();
-  await expect(page.locator('.playback-time')).toHaveText('0 / 10 tu');
+  await expect(page.locator('.playback-time')).toHaveText('0 / 18 tu');
   const cores = page.getByRole('slider', { name: 'Custom CPU cores' });
   await cores.focus();
   await cores.press('Home');
   await expect(page.locator('.metric').first()).toContainText('18');
-  await expect(page.locator('.core-card')).toHaveCount(1);
+  await expect(page.locator('.core-card:not(.worker-card)')).toHaveCount(1);
   await expect(page.locator('.results-table .selected-row')).toContainText('Custom configuration');
 });
 
@@ -141,7 +201,7 @@ test('CSV export contains calculated values and event filtering works', async ({
   for await (const chunk of stream!) text += chunk.toString();
   expect(text).toContain('2,2,10,1.8,0.9,0.9');
   await page.getByLabel('Filter events').selectOption('complete');
-  await expect(page.locator('.event-list')).toContainText('No matching events');
+  await expect(page.locator('.event-list')).toContainText('Schedule preview');
   await page.getByRole('button', { name: 'Step to event' }).click();
   await expect(page.locator('.event-list')).toContainText('B complete');
   await expect(page.locator('.event-list')).not.toContainText('started');
