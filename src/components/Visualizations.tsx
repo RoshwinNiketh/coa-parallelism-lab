@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { Cpu, GitBranch, Activity } from 'lucide-react';
 import { formatNumber as fmt, statesAt, type Simulation } from '../simulation/engine';
 
@@ -5,19 +6,35 @@ const colors = ['#60a5fa', '#50d6bd', '#98b8d5', '#c6a377', '#75bede', '#a8c998'
 export function taskColor(id: string) {
   return colors[[...id].reduce((n, c) => n + c.charCodeAt(0), 0) % colors.length];
 }
-export function Gantt({ result, time }: { result: Simulation; time: number }) {
+export function Gantt({
+  result,
+  time,
+  horizon = result.makespan,
+  title = 'Execution timeline',
+  started = true,
+}: {
+  result: Simulation;
+  time: number;
+  horizon?: number;
+  title?: string;
+  started?: boolean;
+}) {
+  const headingId = useId();
+  time = Math.min(time, result.makespan);
   const width = 850,
     left = 86,
     right = 28,
-    scale = (width - left - right) / result.makespan;
-  const ticks = Array.from({ length: 6 }, (_, i) => (result.makespan * i) / 5);
+    scale = (width - left - right) / horizon;
+  const ticks = [
+    ...new Set(Array.from({ length: 6 }, (_, i) => Math.round((horizon * 1000 * i) / 5) / 1000)),
+  ];
   const height = result.configuration.cores * 68 + 60;
   return (
-    <section className="panel timeline-panel" aria-labelledby="timeline-title">
+    <section className="panel timeline-panel" aria-labelledby={headingId}>
       <div className="panel-heading">
         <div>
-          <h2 id="timeline-title">
-            <Activity size={17} /> Execution timeline
+          <h2 id={headingId}>
+            <Activity size={17} /> {title}
           </h2>
           <p>One lane per CPU core. Every block is real scheduled work.</p>
         </div>
@@ -105,7 +122,7 @@ export function Gantt({ result, time }: { result: Simulation; time: number }) {
                       height="42"
                       rx="5"
                       fill={taskColor(t.id)}
-                      opacity={time >= t.end ? 0.85 : time >= t.start ? 1 : 0.28}
+                      opacity={!started ? 0.28 : time >= t.end ? 0.85 : time >= t.start ? 1 : 0.28}
                     />
                     {t.duration / result.makespan > 0.045 && (
                       <>
@@ -113,7 +130,7 @@ export function Gantt({ result, time }: { result: Simulation; time: number }) {
                           x={left + (t.start + t.duration / 2) * scale}
                           y={y + 18}
                           textAnchor="middle"
-                          className={`task-label ${time < t.start ? 'future' : ''}`}
+                          className={`task-label ${!started || time < t.start ? 'future' : ''}`}
                         >
                           {t.id}
                         </text>
@@ -121,7 +138,7 @@ export function Gantt({ result, time }: { result: Simulation; time: number }) {
                           x={left + (t.start + t.duration / 2) * scale}
                           y={y + 34}
                           textAnchor="middle"
-                          className={`task-time ${time < t.start ? 'future' : ''}`}
+                          className={`task-time ${!started || time < t.start ? 'future' : ''}`}
                         >
                           {fmt(t.start)}–{fmt(t.end)}
                         </text>
@@ -286,8 +303,17 @@ export function DependencyGraph({ result, time }: { result: Simulation; time: nu
   );
 }
 
-export function CoreStates({ result, time }: { result: Simulation; time: number }) {
-  const states = statesAt(result, time);
+export function CoreStates({
+  result,
+  time,
+  started = true,
+}: {
+  result: Simulation;
+  time: number;
+  started?: boolean;
+}) {
+  time = Math.min(time, result.makespan);
+  const states = statesAt(result, started ? time : -1);
   const idsFor = (state: string) =>
     result.tasks.filter((t) => states[t.id] === state).map((t) => t.id);
   return (
@@ -297,7 +323,11 @@ export function CoreStates({ result, time }: { result: Simulation; time: number 
           <h2 id="core-title">
             <Cpu size={17} /> CPU activity
           </h2>
-          <p>Live state at the playback position.</p>
+          <p>
+            {started
+              ? 'Live state at the playback position.'
+              : 'Schedule preview - playback has not started.'}
+          </p>
         </div>
         <span className="tag">
           {result.configuration.cores}C / {result.configuration.workers}W
@@ -311,13 +341,15 @@ export function CoreStates({ result, time }: { result: Simulation; time: number 
               <div>
                 <Cpu size={16} />
                 <span>Core {i + 1}</span>
-                <span className="core-status">{task ? 'Running' : 'Idle'}</span>
+                <span className="core-status">
+                  {!started ? 'Preview' : task ? 'Running' : 'Idle'}
+                </span>
               </div>
               <strong>{task ? `Task ${task.id}` : 'No active task'}</strong>
               <p>
                 {task
                   ? `Worker ${task.worker} · ${fmt(task.end - time)} tu remaining`
-                  : time === result.makespan
+                  : started && time >= result.makespan
                     ? 'All work complete'
                     : 'Waiting for eligible work'}
               </p>
@@ -330,6 +362,40 @@ export function CoreStates({ result, time }: { result: Simulation; time: number 
           );
         })}
       </div>
+      <div className="worker-heading">
+        <h3>Software workers</h3>
+        <p>
+          Each running task occupies one worker and one core simultaneously. Workers are simulated
+          slots.
+        </p>
+      </div>
+      <div className="cores-grid">
+        {Array.from({ length: result.configuration.workers }, (_, i) => {
+          const task = result.schedule.find(
+            (t) => t.worker === i + 1 && states[t.id] === 'running',
+          );
+          return (
+            <div className={`core-card worker-card ${task ? 'busy' : ''}`} key={i}>
+              <div>
+                <span>Worker {i + 1}</span>
+                <span className="core-status">
+                  {!started ? 'Preview' : task ? 'Occupied' : 'Available'}
+                </span>
+              </div>
+              <strong>{task ? `Task ${task.id}` : 'No assigned task'}</strong>
+              <p>
+                {task
+                  ? `Executing on Core ${task.core}`
+                  : !started
+                    ? 'Playback has not started'
+                    : time >= result.makespan
+                      ? 'All work complete'
+                      : 'Awaiting a ready task and core'}
+              </p>
+            </div>
+          );
+        })}
+      </div>
       <div className="state-lists">
         {(['complete', 'ready', 'blocked'] as const).map((state) => (
           <div key={state}>
@@ -337,7 +403,9 @@ export function CoreStates({ result, time }: { result: Simulation; time: number 
               {state === 'complete'
                 ? 'Completed'
                 : state === 'ready'
-                  ? 'Ready · resource wait'
+                  ? started
+                    ? 'Ready · resource wait'
+                    : 'Ready · not started'
                   : 'Blocked · dependencies'}{' '}
               <b>{idsFor(state).length}</b>
             </span>

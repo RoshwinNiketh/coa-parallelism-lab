@@ -1,5 +1,5 @@
 import { Plus, RotateCcw, Trash2, CheckCircle2, AlertCircle } from 'lucide-react';
-import type { Task } from '../simulation/engine';
+import { nextTaskId, type Task } from '../simulation/engine';
 
 export interface TaskRow {
   key: number;
@@ -36,10 +36,8 @@ export default function TaskEditor({
     onChange(rows.map((row) => (row.key === key ? { ...row, [field]: value } : row)));
   }
   function add() {
-    const id =
-      Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i)).find(
-        (id) => !rows.some((r) => r.id === id),
-      ) ?? `T${rows.length + 1}`;
+    if (rows.length >= 40) return;
+    const id = nextTaskId(rows.map((r) => r.id));
     onChange([
       ...rows,
       { key: Math.max(-1, ...rows.map((r) => r.key)) + 1, id, duration: '1', dependencies: '' },
@@ -87,7 +85,7 @@ export default function TaskEditor({
                       type="number"
                       min="0.001"
                       max="10000"
-                      step="any"
+                      step="0.001"
                       value={row.duration}
                       onChange={(e) => edit(row.key, 'duration', e.target.value)}
                     />
