@@ -1,0 +1,10 @@
+import { defineConfig } from 'vitest/config';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+
+export default defineConfig({
+  base: './',
+  plugins: [react(), tailwindcss()],
+  test: { include: ['src/**/*.test.ts'] },
+  build: { rollupOptions: { output: { manualChunks: { charts: ['recharts'] } } } },
+});
