@@ -712,7 +712,7 @@ export default function App() {
                     <h3>
                       {result.makespan === result.criticalPathLength
                         ? 'You’ve reached the dependency limit.'
-                        : 'Resources are limiting this schedule.'}
+                        : 'Dependencies, resources, and scheduling order shape this result.'}
                     </h3>
                     <p>
                       Your selection takes <strong>{fmt(result.makespan)} tu</strong> for{' '}
@@ -729,7 +729,10 @@ export default function App() {
                         )}{' '}
                         tu
                       </strong>
-                      ; both limits apply.
+                      ; both limits apply. This is a theoretical lower bound, not a guaranteed
+                      achievable schedule. Dependencies, task indivisibility, resource capacity, and
+                      alphabetical scheduling all affect makespan. A gap above the bound alone does
+                      not prove suboptimal scheduling.
                     </p>
                   </div>
                 </div>

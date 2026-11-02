@@ -7,6 +7,7 @@ import {
   statesAt,
   nextEventTime,
   type Task,
+  nextTaskId,
 } from './engine';
 
 describe('required default example', () => {
@@ -149,6 +150,53 @@ describe('scheduling invariants', () => {
 });
 
 describe('input validation', () => {
+  it('finds unused valid IDs after deletions and custom IDs', () => {
+    const ids = Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i));
+    ids.push('T1', 'T3', 'T28');
+    expect(nextTaskId(ids)).toBe('T2');
+    while (ids.length < 40) {
+      const id = nextTaskId(ids);
+      expect(ids).not.toContain(id);
+      ids.push(id);
+    }
+    expect(new Set(ids).size).toBe(40);
+    expect(validateTasks(ids.map((id) => ({ id, duration: 1, dependencies: [] })))).toEqual([]);
+  });
+  it('uses integer ticks for decimal sums and simultaneous completions', () => {
+    const r = simulate(
+      [
+        { id: 'A', duration: 0.1, dependencies: [] },
+        { id: 'B', duration: 0.3, dependencies: [] },
+        { id: 'C', duration: 0.2, dependencies: ['A'] },
+      ],
+      { cores: 2, workers: 2 },
+    );
+    expect(r.eventTimes).toEqual([0, 0.1, 0.3]);
+    expect(
+      r.events.filter((e) => e.time === 0.3 && e.type === 'complete').map((e) => e.task),
+    ).toEqual(['B', 'C']);
+    expect(r.totalWork).toBe(0.6);
+    expect(nextEventTime(r, 0.1)).toBe(0.3);
+    for (const duration of [0.001, 1.001, 10000])
+      expect(
+        simulate([{ id: 'A', duration, dependencies: [] }], { cores: 1, workers: 1 }).makespan,
+      ).toBe(duration);
+    expect(validateTasks([{ id: 'A', duration: 0.1001, dependencies: [] }]).join()).toContain(
+      'increments',
+    );
+  });
+  it('preserves alphabetical scheduling without claiming optimality', () => {
+    const r = simulate(
+      [
+        ['A', 2],
+        ['B', 2],
+        ['C', 10],
+      ].map(([id, duration]) => ({ id: String(id), duration: Number(duration), dependencies: [] })),
+      { cores: 2, workers: 2 },
+    );
+    expect(r.makespan).toBe(12);
+    expect(Math.max(r.criticalPathLength, r.totalWork / 2)).toBe(10);
+  });
   it.each([
     null,
     undefined,

@@ -54,6 +54,16 @@ export const SCENARIOS: Configuration[] = [
 ];
 export const alphabetical = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
+export const TICKS_PER_UNIT = 1000;
+export const toTicks = (duration: number) => Math.round(duration * TICKS_PER_UNIT);
+export function nextTaskId(existing: string[]): string {
+  const used = new Set(existing.map((id) => id.trim()));
+  for (let i = 0; i < 26; i++) {
+    const id = String.fromCharCode(65 + i);
+    if (!used.has(id)) return id;
+  }
+  for (let i = 1; ; i++) if (!used.has(`T${i}`)) return `T${i}`;
+}
 export function validateTasks(input: unknown): string[] {
   if (!Array.isArray(input) || !input.length)
     return ['Add at least one task before running the simulation.'];
@@ -80,6 +90,15 @@ export function validateTasks(input: unknown): string[] {
     )
       errors.push(
         `Task ${task.id ?? '?'}: duration must be a finite positive number from 0.001 to 10,000 time units.`,
+      );
+    if (
+      typeof task.duration === 'number' &&
+      Number.isFinite(task.duration) &&
+      Math.abs(task.duration * 1000 - toTicks(task.duration)) >
+        Number.EPSILON * Math.max(1, Math.abs(task.duration * 1000)) * 4
+    )
+      errors.push(
+        `Task ${task.id}: duration must use increments of 0.001 tu (at most three decimal places).`,
       );
     if (
       !Array.isArray(task.dependencies) ||
@@ -128,13 +147,14 @@ export function criticalPath(tasks: Task[]): { path: string[]; length: number } 
         .sort((a, b) => b.length - a.length || alphabetical(a.path.join(','), b.path.join(',')))[0];
       paths.set(task.id, {
         path: [...(previous?.path ?? []), task.id],
-        length: (previous?.length ?? 0) + task.duration,
+        length: (previous?.length ?? 0) + toTicks(task.duration),
       });
     }
   }
-  return [...paths.values()].sort(
+  const longest = [...paths.values()].sort(
     (a, b) => b.length - a.length || alphabetical(a.path.join(','), b.path.join(',')),
   )[0];
+  return { path: longest.path, length: longest.length / TICKS_PER_UNIT };
 }
 
 export function simulate(input: Task[], configuration: Configuration): Simulation {
@@ -148,7 +168,11 @@ export function simulate(input: Task[], configuration: Configuration): Simulatio
   )
     throw new Error('Core and worker counts must be integers from 1 to 8.');
   const tasks = input
-    .map((t) => ({ ...t, dependencies: [...t.dependencies].sort(alphabetical) }))
+    .map((t) => ({
+      ...t,
+      duration: toTicks(t.duration),
+      dependencies: [...t.dependencies].sort(alphabetical),
+    }))
     .sort((a, b) => alphabetical(a.id, b.id));
   const schedule: Assignment[] = [],
     events: LogEvent[] = [],
@@ -219,7 +243,7 @@ export function simulate(input: Task[], configuration: Configuration): Simulatio
         type: 'start',
         task: task.id,
         core,
-        message: `${task.id} started · Core ${core} / Worker ${worker} · finishes at ${formatNumber(assignment.end)}`,
+        message: `${task.id} started · Core ${core} / Worker ${worker} · finishes at ${formatNumber(assignment.end / TICKS_PER_UNIT)}`,
       });
     }
     if (!running.length) break;
@@ -232,7 +256,7 @@ export function simulate(input: Task[], configuration: Configuration): Simulatio
           until: next,
           type: 'idle',
           core,
-          message: `Core ${core} idle [${formatNumber(time)}, ${formatNumber(next)}] · ${waiting ? 'all workers occupied' : pending.some((t) => !started.has(t.id)) ? 'waiting on dependencies' : 'no remaining ready tasks'}`,
+          message: `Core ${core} idle [${formatNumber(time / TICKS_PER_UNIT)}, ${formatNumber(next / TICKS_PER_UNIT)}] · ${waiting ? 'all workers occupied' : pending.some((t) => !started.has(t.id)) ? 'waiting on dependencies' : 'no remaining ready tasks'}`,
         });
       }
     }
@@ -242,16 +266,25 @@ export function simulate(input: Task[], configuration: Configuration): Simulatio
   // With one core and one worker a valid DAG always has ready work until done;
   // the same graph's sequential makespan is therefore exactly its total work.
   const baseline = totalWork;
-  const cp = criticalPath(tasks);
+  const cp = criticalPath(input);
   return {
     configuration: { ...configuration },
-    tasks,
-    schedule,
-    events,
-    eventTimes,
-    totalWork,
-    baseline,
-    makespan: time,
+    tasks: tasks.map((t) => ({ ...t, duration: t.duration / TICKS_PER_UNIT })),
+    schedule: schedule.map((t) => ({
+      ...t,
+      duration: t.duration / TICKS_PER_UNIT,
+      start: t.start / TICKS_PER_UNIT,
+      end: t.end / TICKS_PER_UNIT,
+    })),
+    events: events.map((e) => ({
+      ...e,
+      time: e.time / TICKS_PER_UNIT,
+      ...(e.until === undefined ? {} : { until: e.until / TICKS_PER_UNIT }),
+    })),
+    eventTimes: eventTimes.map((t) => t / TICKS_PER_UNIT),
+    totalWork: totalWork / TICKS_PER_UNIT,
+    baseline: baseline / TICKS_PER_UNIT,
+    makespan: time / TICKS_PER_UNIT,
     criticalPath: cp.path,
     criticalPathLength: cp.length,
     speedup: baseline / time,
