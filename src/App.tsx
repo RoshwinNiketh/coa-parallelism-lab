@@ -20,6 +20,8 @@ import {
   SkipForward,
   Terminal,
   Zap,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import TaskEditor, { toRows, toTasks, type TaskRow } from './components/TaskEditor';
 import { CoreStates, DependencyGraph, Gantt } from './components/Visualizations';
@@ -118,6 +120,20 @@ function EventLog({ result, time }: { result: Simulation; time: number }) {
 }
 
 export default function App() {
+  const [theme, setTheme] = useState<'light' | 'dark'>(() =>
+    document.documentElement.dataset.theme === 'light' ? 'light' : 'dark',
+  );
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute('content', theme === 'light' ? '#f4f7fa' : '#0b1017');
+    try {
+      localStorage.setItem('parallelism-theme', theme);
+    } catch {
+      /* Storage may be unavailable in private browser contexts. */
+    }
+  }, [theme]);
   const [rows, setRows] = useState<TaskRow[]>(() => toRows(DEFAULT_TASKS));
   const [configuration, setConfiguration] = useState<Configuration>({ cores: 2, workers: 2 });
   const [custom, setCustom] = useState<Configuration>({ cores: 4, workers: 4 });
@@ -246,6 +262,18 @@ export default function App() {
             <small>Explore how work runs.</small>
           </span>
         </a>
+        <button
+          className="theme-toggle"
+          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+          aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+        >
+          {theme === 'dark' ? (
+            <Sun size={16} aria-hidden="true" />
+          ) : (
+            <Moon size={16} aria-hidden="true" />
+          )}
+          {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+        </button>
         <div className="sidebar-label">Workspace</div>
         <nav aria-label="Main navigation">
           {[

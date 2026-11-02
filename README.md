@@ -32,6 +32,8 @@ Browser tests use installed Microsoft Edge on Windows and Playwright Chromium on
 
 ## Features
 
+- Light/dark mode toggle available on desktop and mobile. The selected theme is saved locally and restored before the app renders; switching themes preserves playback and workload state.
+
 - Editable task table with add/remove, durations, comma-separated prerequisites, and default restoration.
 - Validation of empty/malformed inputs, duplicate IDs, nonpositive/nonfinite durations, unknown dependencies, self-dependencies, duplicate prerequisites, and cycles. Invalid graphs cannot run.
 - Four standard scenarios and independent 1–8 core/worker controls with a selectable custom comparison.
