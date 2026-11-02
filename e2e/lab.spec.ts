@@ -115,6 +115,23 @@ test('default metrics, comparisons and diagrams match the scheduler', async ({ p
   expect(errors).toEqual([]);
 });
 
+test('minimum-resolution workloads have distinct timeline tick labels and exact steps', async ({
+  page,
+}) => {
+  for (const id of ['F', 'E', 'D', 'C', 'B'])
+    await page.getByRole('button', { name: `Remove task ${id}`, exact: true }).click();
+  await page.getByLabel('Task 1 duration', { exact: true }).fill('0.001');
+  const labels = await page
+    .locator('.model svg.gantt')
+    .first()
+    .locator('.axis-text')
+    .allTextContents();
+  expect(labels).toEqual(['0', '0.001']);
+  await page.getByRole('button', { name: 'Step to event' }).click();
+  await expect(page.locator('.playback-time')).toHaveText('0.001 / 0.001 tu');
+  await expect(page.getByRole('status', { name: 'Simulation status' })).toHaveText('Complete');
+});
+
 test('playback can step, run, pause, resume, finish, and reset', async ({ page }) => {
   await page.getByRole('button', { name: 'Step to event' }).click();
   await expect(page.locator('.playback-time')).toHaveText('3 / 18 tu');

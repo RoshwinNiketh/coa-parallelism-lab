@@ -25,7 +25,9 @@ export function Gantt({
     left = 86,
     right = 28,
     scale = (width - left - right) / horizon;
-  const ticks = Array.from({ length: 6 }, (_, i) => (horizon * i) / 5);
+  const ticks = [
+    ...new Set(Array.from({ length: 6 }, (_, i) => Math.round((horizon * 1000 * i) / 5) / 1000)),
+  ];
   const height = result.configuration.cores * 68 + 60;
   return (
     <section className="panel timeline-panel" aria-labelledby={headingId}>
